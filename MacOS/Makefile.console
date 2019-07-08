@@ -1,0 +1,5 @@
+ CONSOLE_HOST     = 127.0.0.1
+ CONSOLE_PORT     = 1235
+
+launch-console :
+	@nc ${CONSOLE_HOST} ${CONSOLE_PORT}

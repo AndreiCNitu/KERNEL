@@ -1,0 +1,6 @@
+#include "SP804.h"
+
+SP804_t* TIMER0 = ( SP804_t* )( 0x10011000 );
+SP804_t* TIMER1 = ( SP804_t* )( 0x10012000 );
+SP804_t* TIMER2 = ( SP804_t* )( 0x10018000 );
+SP804_t* TIMER3 = ( SP804_t* )( 0x10019000 );
