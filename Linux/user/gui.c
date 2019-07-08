@@ -1,0 +1,212 @@
+#include "gui.h"
+
+void puts( char* x, int n ) {
+  write_nb( LCD_DISPLAY, x, n );
+}
+
+void gets( char* x, int n ) {
+  for( int i = 0; i < n; i++ ) {
+    x[ i ] = PL011_getc( UART1, true );
+
+    if( x[ i ] == '\x0A' ) {
+      x[ i ] = '\x00'; break;
+    }
+  }
+}
+
+/* Since we lack a *real* loader (as a result of also lacking a storage
+ * medium to store program images), the following function approximates
+ * one: given a program name from the set of programs statically linked
+ * into the kernel image, it returns a pointer to the entry point.
+ */
+
+extern void main_P3();
+extern void main_P4();
+extern void main_P5();
+extern void main_pipe();
+extern void main_philosophers();
+
+void* load( char* x ) {
+  if     ( 0 == strcmp( x, "P3"           ) ) {
+      return &main_P3;
+  }
+  else if( 0 == strcmp( x, "P4"           ) ) {
+      return &main_P4;
+  }
+  else if( 0 == strcmp( x, "P5"           ) ) {
+      return &main_P5;
+  }
+  else if( 0 == strcmp( x, "pipe"         ) ) {
+      return &main_pipe;
+  }
+  else if( 0 == strcmp( x, "philosophers" ) ) {
+      return &main_philosophers;
+  }
+
+  return NULL;
+}
+
+// needed to clear the screen
+extern uint16_t fb[ 600 ][ 800 ];
+extern int      pos_line;
+extern int      pos_col;
+
+/* The behaviour of a console process can be summarised as an infinite
+ * loop over three main steps, namely
+ *
+ * 1. write a command prompt then read a command,
+ * 2. split the command into space-separated tokens using strtok, then
+ * 3. execute whatever steps the command dictates.
+ *
+ * As is, the console only recognises the following commands:
+ *
+ * a. execute <program name>
+ *
+ *    This command will use fork to create a new process; the parent
+ *    (i.e., the console) will continue as normal, whereas the child
+ *    uses exec to replace the process image and thereby execute a
+ *    different (named) program.  For example,
+ *
+ *    execute P3
+ *
+ *    would execute the user program named P3, with priority 120, niceness 0.
+ *
+ * b. nice <priority> <program name>
+ *
+ *    Same as execute, but sets niceness value to <priority>
+ *
+ * c. renice <priority> <process ID>
+ *
+ *    Resets the niceness value of the process with given PID
+ *    to the value given.
+ *
+ * d. terminate <process ID>
+ *
+ *    This command uses kill to send a terminate or SIG_TERM signal
+ *    to a specific process (identified via the PID provided); this
+ *    acts to forcibly terminate the process, vs. say that process
+ *    using exit to terminate itself.  For example,
+ *
+ *    terminate 3
+ *
+ *    would terminate the process whose PID is 3.
+ *
+ *    terminate 0
+ *
+ *    would terminate all the processes except the console
+ *
+ */
+
+void main_gui() {
+    char  x[ 100 ];
+    char* p;
+
+    while( 1 ) {
+        int nbytes = read_nb( STDIN_FILENO, x, 100 );
+        if( nbytes != 0 ) {
+            p = strtok( x, " " );
+
+            if( 0 == strcmp( p, "execute" ) )
+            {
+              void* program = load( strtok( NULL, " " ) );
+              if( NULL == program ) {
+                  puts( "Invalid program\n", 16 );
+              }
+              else {
+                  pid_t pid = fork();
+
+                  if( 0 == pid ) {
+                    exec( program );
+                  }
+              }
+              puts( "shell$ ", 7 );
+            }
+            else if( 0 == strcmp( p, "terminate" ) )
+            {
+              pid_t pid = atoi( strtok( NULL, " " ) );
+              int   s   = atoi( strtok( NULL, " " ) );
+
+              int r = kill( pid, s );
+              if( r == 0 ) {
+                  if( pid == 0) {
+                      puts( "All processes terminated successfully\n", 38 );
+                  }
+                  else {
+                      puts( "Process with PID ", 17 );
+                      char* m; itoa( m, pid );
+                      if( pid < 10) {
+                          puts( m, 1 );
+                      }
+                      else if( pid >= 10 ) {
+                          puts( m, 2 );
+                      }
+                      puts( " terminated successfully\n", 25 );
+                  }
+              }
+              else if( r == -1) {
+                  puts( "Terminate command failed\n", 25 );
+              }
+              puts( "shell$ ", 7 );
+            }
+            else if( 0 == strcmp( p, "nice" ) )
+            {
+                int   pr      = atoi( strtok( NULL, " " ) );
+                void* program = load( strtok( NULL, " " ) );
+                if( (pr < -20) || (pr > 19) )
+                {
+                    puts( "Invalid nice value\n", 19 );
+                    puts( "Please enter a value from -20 to 19\n", 36 );
+                }
+                else if( NULL == program ) {
+                    puts( "Invalid program\n", 16 );
+                }
+                else {
+                    pid_t pid = fork();
+
+                    if( 0 == pid ) {
+                      exec( program );
+                    }
+                    else {
+                        nice( pid, pr );
+                        // -20 .. 19
+                    }
+                }
+                puts( "shell$ ", 7 );
+            }
+            else if( 0 == strcmp( p, "renice" ) )
+            {
+                int   pr  = atoi( strtok( NULL, " " ) );
+                pid_t pid = atoi( strtok( NULL, " " ) );
+                if( (pr < -20) || (pr > 19) ) {
+                    puts( "Invalid nice value\n", 19 );
+                    puts( "Please enter a value from -20 to 19\n", 36 );
+                }
+                else {
+                    nice( pid, pr );
+                    // -20 .. 19
+                }
+                puts( "shell$ ", 7 );
+            }
+            else if( 0 == strcmp( p, "top" ) ) {
+                top();
+            }
+            else if( 0 == strcmp( p, "clear" ) ) {
+                for( int i = 0; i < 600; i++ ) {
+                    for( int j = 0; j< 800; j++ ) {
+                        fb[ i ][ j ] = 0x0;
+                    }
+                }
+                pos_col  = 0;
+                pos_line = 0;
+                puts( "shell$ ", 7 );
+            }
+            else
+            {
+              puts( "unknown command\n", 16 );
+              puts( "shell$ ", 7 );
+            }
+        }
+    }
+
+    exit( EXIT_SUCCESS );
+}
